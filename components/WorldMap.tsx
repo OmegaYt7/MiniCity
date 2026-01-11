@@ -20,8 +20,10 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
   });
   
   // Interaction State
+  const activePointers = useRef<Map<number, {x: number, y: number}>>(new Map());
+  const prevPinchInfo = useRef<{dist: number, center: {x: number, y: number}} | null>(null);
   const isDragging = useRef(false);
-  const lastMousePos = useRef({ x: 0, y: 0 });
+  const lastPanPos = useRef({ x: 0, y: 0 }); // For single finger pan delta
   const longPressTimer = useRef<number | null>(null);
 
   // Mouse Grid Position
@@ -81,13 +83,10 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             
             // Draw Road Markings (Simple Center Line)
             ctx.fillStyle = COLORS.ROAD_MARKING;
-            // Check neighbors to connect lines roughly
-            // For simplicity in this view, just a center dash
             const dashSize = 10;
             ctx.fillRect(posX + TILE_SIZE/2 - 2, posY + TILE_SIZE/2 - dashSize/2, 4, dashSize);
             ctx.fillRect(posX + TILE_SIZE/2 - dashSize/2, posY + TILE_SIZE/2 - 2, dashSize, 4);
           }
-          // Water is background
         }
       }
 
@@ -150,8 +149,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
         if (hoverTile.x < 0 || hoverTile.y < 0 || hoverTile.x + def.width > mapData.width || hoverTile.y + def.height > mapData.height) {
             valid = false;
         } else {
-             // Terrain check (Must be GRASS or SAND - relaxed for fun)
-             // Let's allow building on Sand too now, but not Water or Road
+             // Terrain check (Must be GRASS or SAND)
             for(let i=0; i<def.width; i++) {
                 for(let j=0; j<def.height; j++) {
                     const tile = mapData.tiles[hoverTile.y+j]?.[hoverTile.x+i];
@@ -195,60 +193,179 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
     y: (sy - camera.y) / camera.zoom,
   });
 
+  // Pointer Events (Mouse + Touch)
   const handlePointerDown = (e: React.PointerEvent) => {
-    isDragging.current = false;
-    lastMousePos.current = { x: e.clientX, y: e.clientY };
-    onInteract();
-    longPressTimer.current = window.setTimeout(() => {}, 500);
+    canvasRef.current?.setPointerCapture(e.pointerId);
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    
+    // Interaction Trigger
+    if (activePointers.current.size === 1) {
+        onInteract();
+        isDragging.current = false;
+        lastPanPos.current = { x: e.clientX, y: e.clientY };
+        
+        longPressTimer.current = window.setTimeout(() => {
+            // Placeholder for long press
+        }, 500);
+    } 
+    else if (activePointers.current.size === 2) {
+        // Start Pinch
+        isDragging.current = false; // Disable pan drag if pinching starts
+        if (longPressTimer.current) clearTimeout(longPressTimer.current);
+
+        const points = Array.from(activePointers.current.values());
+        const p1 = points[0];
+        const p2 = points[1];
+        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        prevPinchInfo.current = { dist, center };
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-    
-    if (e.buttons === 1) {
-      const dx = e.clientX - lastMousePos.current.x;
-      const dy = e.clientY - lastMousePos.current.y;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) isDragging.current = true;
-
-      if (isDragging.current) {
-        setCamera(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-        lastMousePos.current = { x: e.clientX, y: e.clientY };
-      }
+    if (activePointers.current.has(e.pointerId)) {
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     }
 
-    if (mode === 'PLACING') {
-      const worldPos = screenToWorld(e.clientX, e.clientY);
-      const tx = Math.floor(worldPos.x / TILE_SIZE);
-      const ty = Math.floor(worldPos.y / TILE_SIZE);
-      setHoverTile({ x: tx, y: ty });
+    if (longPressTimer.current) { 
+        // Cancel long press on move
+        const dx = Math.abs(e.clientX - lastPanPos.current.x);
+        const dy = Math.abs(e.clientY - lastPanPos.current.y);
+        if (dx > 5 || dy > 5) {
+             clearTimeout(longPressTimer.current); 
+             longPressTimer.current = null;
+        }
+    }
+
+    // --- PINCH ZOOM (2 Fingers) ---
+    if (activePointers.current.size === 2) {
+        const points = Array.from(activePointers.current.values());
+        const p1 = points[0];
+        const p2 = points[1];
+        
+        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+        if (prevPinchInfo.current) {
+            const oldDist = prevPinchInfo.current.dist;
+            const oldCenter = prevPinchInfo.current.center;
+
+            if (oldDist > 10 && dist > 10) {
+                const zoomRatio = dist / oldDist;
+                
+                setCamera(prev => {
+                    let newZoom = prev.zoom * zoomRatio;
+                    newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
+                    
+                    // Effective ratio after clamping
+                    const effectiveRatio = newZoom / prev.zoom;
+
+                    // Calculate new offset to keep world point under 'center' (and account for center movement)
+                    // Formula: NewOffset = Center - (OldCenter - OldOffset) * Ratio
+                    const newX = center.x - (oldCenter.x - prev.x) * effectiveRatio;
+                    const newY = center.y - (oldCenter.y - prev.y) * effectiveRatio;
+
+                    return { x: newX, y: newY, zoom: newZoom };
+                });
+            }
+        }
+        prevPinchInfo.current = { dist, center };
+        return;
+    }
+
+    // --- PAN (1 Finger / Mouse) ---
+    if (activePointers.current.size === 1 && e.isPrimary) {
+        const dx = e.clientX - lastPanPos.current.x;
+        const dy = e.clientY - lastPanPos.current.y;
+        
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) isDragging.current = true;
+
+        if (isDragging.current) {
+            setCamera(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+            lastPanPos.current = { x: e.clientX, y: e.clientY };
+        }
+
+        // --- PLACEMENT HOVER ---
+        if (mode === 'PLACING') {
+            const worldPos = screenToWorld(e.clientX, e.clientY);
+            const tx = Math.floor(worldPos.x / TILE_SIZE);
+            const ty = Math.floor(worldPos.y / TILE_SIZE);
+            setHoverTile({ x: tx, y: ty });
+        }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    canvasRef.current?.releasePointerCapture(e.pointerId);
+    activePointers.current.delete(e.pointerId);
     
-    if (!isDragging.current) {
-      const worldPos = screenToWorld(e.clientX, e.clientY);
-      const tx = Math.floor(worldPos.x / TILE_SIZE);
-      const ty = Math.floor(worldPos.y / TILE_SIZE);
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
 
-      if (mode === 'PLACING' && selectedBuildingDef) {
-        const success = actions.placeBuilding(selectedBuildingDef, tx, ty);
-        if (success) { /* feedback */ }
-      } else if (mode === 'VIEW' || mode === 'INSPECT') {
-        const clickedBuilding = [...buildings].reverse().find(b => {
-          const def = BUILDINGS.find(d => d.id === b.defId)!;
-          return (tx >= b.x && tx < b.x + def.width && ty >= b.y && ty < b.y + def.height);
-        });
-        actions.selectInstance(clickedBuilding || null);
-      }
+    // Reset Pinch info if not enough fingers
+    if (activePointers.current.size < 2) {
+        prevPinchInfo.current = null;
     }
-    isDragging.current = false;
+
+    // Reset Pan reference to remaining finger to prevent jump
+    if (activePointers.current.size === 1) {
+        const p = activePointers.current.values().next().value;
+        if (p) lastPanPos.current = { x: p.x, y: p.y };
+    }
+
+    // --- CLICK HANDLING ---
+    // Only if we weren't dragging/pinching
+    if (!isDragging.current && activePointers.current.size === 0) {
+        const worldPos = screenToWorld(e.clientX, e.clientY);
+        const tx = Math.floor(worldPos.x / TILE_SIZE);
+        const ty = Math.floor(worldPos.y / TILE_SIZE);
+
+        if (mode === 'PLACING' && selectedBuildingDef) {
+            const success = actions.placeBuilding(selectedBuildingDef, tx, ty);
+            if (success) { 
+                actions.setMode('VIEW');
+                actions.selectBuildingDef(null);
+            }
+        } else if (mode === 'VIEW' || mode === 'INSPECT') {
+            const clickedBuilding = [...buildings].reverse().find(b => {
+                const def = BUILDINGS.find(d => d.id === b.defId)!;
+                return (tx >= b.x && tx < b.x + def.width && ty >= b.y && ty < b.y + def.height);
+            });
+            actions.selectInstance(clickedBuilding || null);
+        }
+    }
+    
+    // Reset dragging if no pointers left
+    if (activePointers.current.size === 0) {
+        isDragging.current = false;
+    }
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    const delta = -e.deltaY * 0.001;
-    setCamera(prev => ({ ...prev, zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev.zoom + delta)) }));
+    // Prevent default browser zoom
+    // e.preventDefault(); // Passive event listeners cannot prevent default usually, handled by CSS
+    
+    const { clientX, clientY, deltaY } = e;
+    
+    setCamera(prev => {
+        // Zoom factor
+        const scaleAmount = -deltaY * 0.001; 
+        let newZoom = prev.zoom * (1 + scaleAmount);
+        newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
+        
+        // Calculate ratio
+        const zoomRatio = newZoom / prev.zoom;
+
+        // Zoom towards mouse:
+        // P_world = (Mouse - Cam) / Zoom
+        // NewCam = Mouse - P_world * NewZoom
+        // NewCam = Mouse - ((Mouse - Cam) / Zoom) * NewZoom
+        // NewCam = Mouse - (Mouse - Cam) * Ratio
+        
+        const newX = clientX - (clientX - prev.x) * zoomRatio;
+        const newY = clientY - (clientY - prev.y) * zoomRatio;
+
+        return { x: newX, y: newY, zoom: newZoom };
+    });
   };
 
   return (
@@ -260,6 +377,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
       onWheel={handleWheel}
       onContextMenu={(e) => e.preventDefault()}
     />

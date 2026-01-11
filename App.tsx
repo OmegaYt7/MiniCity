@@ -63,14 +63,23 @@ function App() {
 
 // Helper component to show hints based on mode
 const InstructionOverlay = () => {
-  const { mode } = useGame();
+  const { mode, actions } = useGame();
   
   if (mode === 'PLACING') {
     return (
-      <div className="absolute top-28 left-0 w-full flex justify-center pointer-events-none z-20">
-        <div className="bg-white/90 backdrop-blur-md text-slate-700 px-6 py-2.5 rounded-full shadow-xl font-bold animate-pulse border border-white/50 flex items-center gap-2">
-          <span>👇</span> Нажми на клетку для стройки
+      <div className="absolute bottom-8 left-0 w-full flex flex-col items-center gap-4 pointer-events-none z-40">
+        <div className="bg-white/90 backdrop-blur-md text-slate-700 px-6 py-3 rounded-2xl shadow-xl font-bold border border-white/50 flex items-center gap-2 animate-bounce">
+          <span>👇</span> Выберите место для стройки
         </div>
+        <button 
+            onClick={() => {
+                actions.setMode('VIEW');
+                actions.selectBuildingDef(null);
+            }}
+            className="pointer-events-auto bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-full shadow-lg transition-transform active:scale-95"
+        >
+            Отмена
+        </button>
       </div>
     );
   }

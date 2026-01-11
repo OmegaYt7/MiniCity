@@ -6,8 +6,8 @@ import { audioService } from '../../services/audioService';
 const BuildingInspect: React.FC = () => {
   const { mode, selectedBuildingDef, selectedInstance, actions, state } = useGame();
 
-  // Allow component to render in PREVIEW mode as well
-  if (mode !== 'PLACING' && mode !== 'INSPECT' && mode !== 'BUILDING_PREVIEW') return null;
+  // Show only in PREVIEW or INSPECT mode. Hide during PLACING so user can see the map.
+  if (mode !== 'INSPECT' && mode !== 'BUILDING_PREVIEW') return null;
 
   const def = selectedInstance 
     ? BUILDINGS.find(d => d.id === selectedInstance.defId) 
@@ -17,13 +17,12 @@ const BuildingInspect: React.FC = () => {
 
   const handleCancel = () => {
     audioService.playClick();
-    if (mode === 'PLACING' || mode === 'BUILDING_PREVIEW') actions.selectBuildingDef(null);
+    if (mode === 'BUILDING_PREVIEW') actions.selectBuildingDef(null);
     if (mode === 'INSPECT') actions.selectInstance(null);
   };
 
   // Determine which visual state we are in
   const isPreview = mode === 'BUILDING_PREVIEW';
-  const isPlacement = mode === 'PLACING';
   const isInspect = mode === 'INSPECT';
 
   const canAfford = state.coins >= def.price;
@@ -65,7 +64,7 @@ const BuildingInspect: React.FC = () => {
             <div className="mb-4">
                 <div className="flex justify-between items-start mb-1">
                   <h2 className="text-2xl font-black text-slate-800 leading-tight">{def.name}</h2>
-                  {(isPlacement || isPreview) && (
+                  {isPreview && (
                     <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-bold shadow-sm">
                       {def.price} 💰
                     </div>
@@ -114,20 +113,7 @@ const BuildingInspect: React.FC = () => {
                 </button>
             )}
 
-            {/* 2. Placing Mode: Show Cancel/Instruction */}
-            {isPlacement && (
-                <div className="text-center">
-                   <div className="text-sm font-bold text-slate-400 animate-pulse mb-2">Нажми на карту для стройки</div>
-                   <button 
-                     onClick={handleCancel}
-                     className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3 rounded-xl transition-colors"
-                   >
-                     Отмена
-                   </button>
-                </div>
-            )}
-
-            {/* 3. Inspect Mode: Show Upgrade */}
+            {/* 2. Inspect Mode: Show Upgrade */}
             {isInspect && (
                 <button 
                     onClick={() => actions.upgradeBuilding(selectedInstance!.id)}
