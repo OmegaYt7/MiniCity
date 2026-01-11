@@ -1,0 +1,5 @@
+{
+  "name": "Mini City Builder",
+  "description": "A modern, tile-based city building game optimized for Telegram Mini Apps with smooth camera controls and resource management.",
+  "requestFramePermissions": []
+}
