@@ -3,8 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline' https://telegram.org https://cdn.tailwindcss.com;">
     
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline' https://telegram.org https://cdn.tailwindcss.com;">
+
     <title>Mini City Builder</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏗️</text></svg>">
     
@@ -13,26 +14,43 @@
 
     <style>
       body, html {
-        width: 100%; height: 100%; margin: 0; padding: 0;
-        overflow: hidden; background-color: #0f172a; /* Твой Slate 900 */
-        user-select: none; -webkit-user-select: none;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #0f172a; /* Slate 900 - Deep Ocean */
+        user-select: none;
+        -webkit-user-select: none;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         color: #e2e8f0;
       }
-      ::-webkit-scrollbar { display: none; }
       
-      /* Твои анимации */
-      @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-5px); } }
+      /* Hide scrollbars */
+      ::-webkit-scrollbar { display: none; }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      
+      /* Custom Animations */
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-5px); }
+      }
       .animate-float { animation: float 3s ease-in-out infinite; }
       
-      @keyframes bounce-gentle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+      @keyframes bounce-gentle {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+      }
       .animate-bounce-gentle { animation: bounce-gentle 2s infinite; }
 
       .touch-action-none { touch-action: none; }
       .loading-bar { transition: width 1.5s ease-in-out; }
+      
+      /* Чтобы React занимал весь экран */
       #root { width: 100%; height: 100%; }
     </style>
-  </head>
+</head>
   <body>
     <div id="root"></div>
 
@@ -40,6 +58,8 @@
       if (window.Telegram && window.Telegram.WebApp) {
         window.Telegram.WebApp.ready();
         window.Telegram.WebApp.expand();
+        // Красим шапку телеграма в цвет фона игры
+        window.Telegram.WebApp.setHeaderColor('#0f172a'); 
       }
     </script>
 
