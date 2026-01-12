@@ -4,131 +4,165 @@ import { BUILDINGS } from '../../constants';
 import { audioService } from '../../services/audioService';
 
 const BuildingInspect: React.FC = () => {
-  const { mode, selectedBuildingDef, selectedInstance, actions, state } = useGame();
+  const { mode, selectedInstance, actions, state, populationStats } = useGame();
 
-  // Show only in PREVIEW or INSPECT mode. Hide during PLACING so user can see the map.
-  if (mode !== 'INSPECT' && mode !== 'BUILDING_PREVIEW') return null;
+  if (mode !== 'INSPECT') return null;
 
-  const def = selectedInstance 
-    ? BUILDINGS.find(d => d.id === selectedInstance.defId) 
-    : selectedBuildingDef;
-
-  if (!def) return null;
+  const def = BUILDINGS.find(d => d.id === selectedInstance?.defId);
+  if (!def || !selectedInstance) return null;
 
   const handleCancel = () => {
     audioService.playClick();
-    if (mode === 'BUILDING_PREVIEW') actions.selectBuildingDef(null);
-    if (mode === 'INSPECT') actions.selectInstance(null);
+    actions.selectInstance(null);
   };
 
-  // Determine which visual state we are in
-  const isPreview = mode === 'BUILDING_PREVIEW';
-  const isInspect = mode === 'INSPECT';
+  const level = selectedInstance.level;
+  const maxLevel = def.maxLevel || 3;
+  const nextLevel = level + 1;
+  const upgradeCost = Math.floor(def.price * nextLevel * 0.5);
+  
+  // Calculate Deltas
+  const currentIncome = Math.floor(def.income * (1 + (level - 1) * 0.5));
+  const nextIncome = Math.floor(def.income * (1 + (nextLevel - 1) * 0.5));
+  
+  const isResidential = def.population > 0;
+  const currentPopVal = Math.abs(def.population * level);
+  const nextPopVal = Math.abs(def.population * nextLevel);
+  const popDelta = nextPopVal - currentPopVal;
 
-  const canAfford = state.coins >= def.price;
-
-  const handleBuildClick = () => {
-      if (canAfford) {
-          audioService.playClick();
-          actions.setMode('PLACING');
-      } else {
-          audioService.playError();
-      }
-  };
+  // Validation
+  const hasMoney = state.coins >= upgradeCost;
+  // If residential, upgrade is always allowed (gives capacity).
+  // If commercial/industrial, upgrade requires available workers (Capacity - Current > Increase)
+  const hasWorkers = isResidential 
+    ? true 
+    : (populationStats.maxCapacity - populationStats.currentWorkers) >= popDelta;
 
   return (
-    <>
-    <div className="fixed inset-0 z-20" onClick={handleCancel}></div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCancel}></div>
 
-    <div className="absolute top-0 right-0 h-full w-full pointer-events-none flex flex-col justify-end md:justify-center md:items-end md:pr-6 z-30 pb-24 md:pb-0 safe-area-bottom">
-      
-      <div className="pointer-events-auto w-full md:w-96 mx-4 md:mx-0 bg-white/95 backdrop-blur-xl rounded-t-3xl md:rounded-3xl shadow-2xl border border-white/50 overflow-hidden animate-in slide-in-from-bottom-10 md:slide-in-from-right-10 fade-in duration-300 flex flex-col">
+      <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         
-        {/* Header Image */}
+        {/* Header */}
         <div 
-            className="h-40 w-full flex items-center justify-center relative transition-colors duration-500"
-            style={{ backgroundColor: def.imageColor }}
+            className="h-32 w-full flex items-center justify-center relative"
+            style={{ background: `linear-gradient(to bottom, ${def.imageColor}44, #0f172a)` }}
         >
-            <span className="text-7xl filter drop-shadow-xl transform transition-transform hover:scale-110 duration-300">🏠</span>
+            <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+            <span className="text-6xl filter drop-shadow-[0_0_15px_rgba(255,255,255,0.4)] animate-float">
+                {def.lightRadius ? '💡' : '🏠'}
+            </span>
+            <button onClick={handleCancel} className="absolute top-4 right-4 bg-black/30 hover:bg-black/50 text-white rounded-full w-8 h-8 flex items-center justify-center backdrop-blur-md">✕</button>
             
-            <button 
-                onClick={handleCancel}
-                className="absolute top-4 right-4 bg-black/20 hover:bg-black/40 text-white rounded-full w-9 h-9 flex items-center justify-center backdrop-blur-md transition-all active:scale-90"
-            >
-                ✕
-            </button>
+            <div className="absolute bottom-4 left-4 flex gap-1">
+                {Array.from({length: maxLevel}).map((_, i) => (
+                    <div key={i} className={`w-2 h-2 rounded-full ${i < level ? 'bg-yellow-400 shadow-[0_0_5px_orange]' : 'bg-slate-700'}`}></div>
+                ))}
+            </div>
         </div>
 
         {/* Content */}
         <div className="p-6">
-            <div className="mb-4">
-                <div className="flex justify-between items-start mb-1">
-                  <h2 className="text-2xl font-black text-slate-800 leading-tight">{def.name}</h2>
-                  {isPreview && (
-                    <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-bold shadow-sm">
-                      {def.price} 💰
-                    </div>
-                  )}
+            <div className="flex justify-between items-start mb-2">
+                <div>
+                    <h2 className="text-2xl font-black text-white leading-none">{def.name}</h2>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">{def.category}</span>
                 </div>
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">{def.category}</div>
             </div>
 
-            <p className="text-slate-600 text-sm leading-relaxed mb-6 font-medium">
+            <p className="text-slate-400 text-sm leading-relaxed mb-6 border-b border-slate-800 pb-4">
                 {def.description}
             </p>
 
-            {/* Stats Grid */}
-            <div className="grid grid-cols-3 gap-3 mb-6">
-                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex flex-col items-center justify-center">
-                    <span className="text-xl mb-1">⚡</span>
-                    <div className="text-[10px] text-slate-400 uppercase font-bold">Доход</div>
-                    <div className="font-bold text-slate-800">{def.income > 0 ? `+${def.income}` : '-'}</div>
-                </div>
-                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex flex-col items-center justify-center">
-                    <span className="text-xl mb-1">👥</span>
-                    <div className="text-[10px] text-slate-400 uppercase font-bold">Люди</div>
-                    <div className="font-bold text-slate-800">{def.population > 0 ? `+${def.population}` : '-'}</div>
-                </div>
-                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex flex-col items-center justify-center">
-                    <span className="text-xl mb-1">⭐</span>
-                    <div className="text-[10px] text-slate-400 uppercase font-bold">XP</div>
-                    <div className="font-bold text-slate-800">{def.xp}</div>
-                </div>
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-2 mb-6">
+                 {def.income > 0 && <StatBox icon="⚡" label="Доход" value={`+${currentIncome}`} sub=" /м" color="text-green-400" />}
+                 
+                 {isResidential ? (
+                     <StatBox icon="🏠" label="Места" value={`+${currentPopVal}`} color="text-blue-400" />
+                 ) : (
+                    def.population !== 0 ? <StatBox icon="👷" label="Рабочие" value={`-${currentPopVal}`} color="text-orange-400" /> : null
+                 )}
+                 
+                 <StatBox icon="⭐" label="XP" value={def.xp * level} color="text-purple-400" />
             </div>
 
-            {/* Action Buttons */}
+            {/* UPGRADE */}
+            {level < maxLevel && (
+                <div className="bg-slate-800/50 rounded-xl p-3 mb-4 border border-slate-700">
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-slate-300 uppercase">След. уровень</span>
+                        <div className="text-xs">
+                             {def.income > 0 && <span className="text-green-400 mr-2">+{nextIncome - currentIncome} доход</span>}
+                             {isResidential 
+                                ? <span className="text-blue-400">+{popDelta} жилья</span>
+                                : (def.population !== 0 && <span className="text-orange-400">-{popDelta} рабочих</span>)
+                             }
+                        </div>
+                    </div>
+                    
+                    <div className="flex gap-2 text-xs mb-3">
+                        <div className={`px-2 py-1 rounded border ${hasMoney ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-200' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
+                            💰 {upgradeCost}
+                        </div>
+                        {!isResidential && def.population !== 0 && (
+                            <div className={`px-2 py-1 rounded border ${hasWorkers ? 'border-blue-500/30 bg-blue-500/10 text-blue-200' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
+                                👷 Треб. {popDelta} своб.
+                            </div>
+                        )}
+                    </div>
+
+                    <button 
+                        onClick={() => actions.upgradeBuilding(selectedInstance.id)}
+                        disabled={!hasMoney || !hasWorkers}
+                        className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
+                            hasMoney && hasWorkers
+                            ? 'bg-gradient-to-r from-yellow-600 to-orange-600 hover:brightness-110 text-white shadow-lg'
+                            : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                        }`}
+                    >
+                        <span>Улучшить</span>
+                        <span className="text-lg">⬆️</span>
+                    </button>
+                </div>
+            )}
             
-            {/* 1. Preview Mode: Show Build Button */}
-            {isPreview && (
-                <button 
-                    onClick={handleBuildClick}
-                    disabled={!canAfford}
-                    className={`w-full font-bold rounded-xl py-4 shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 uppercase tracking-wide ${
-                        canAfford 
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200' 
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                    }`}
-                >
-                    {canAfford ? 'Построить' : 'Недостаточно средств'}
-                </button>
+            {level >= maxLevel && (
+                <div className="w-full py-3 bg-slate-800 rounded-lg text-center text-yellow-500 font-bold border border-yellow-500/20 mb-4">
+                    ✨ МАКСИМУМ
+                </div>
             )}
 
-            {/* 2. Inspect Mode: Show Upgrade */}
-            {isInspect && (
+            <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-800">
                 <button 
-                    onClick={() => actions.upgradeBuilding(selectedInstance!.id)}
-                    className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-xl py-4 shadow-lg shadow-blue-200 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    onClick={() => actions.startMovingBuilding(selectedInstance.id)}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-lg font-bold transition-colors border border-slate-700"
                 >
-                    <span className="text-xl">⬆️</span> 
-                    <span>Улучшить</span>
-                    <span className="bg-white/20 px-2 py-0.5 rounded text-sm ml-1">100💰</span>
+                    🔄 Переместить
                 </button>
-            )}
+                <button 
+                    onClick={() => actions.destroyBuilding(selectedInstance.id)}
+                    className="bg-red-900/20 hover:bg-red-900/40 text-red-400 hover:text-red-300 py-3 rounded-lg font-bold transition-colors border border-red-900/30 flex flex-col items-center leading-none justify-center gap-1"
+                >
+                    <span>Снести</span>
+                    <span className="text-[10px] opacity-70">+{Math.floor(def.price * 0.5)}</span>
+                </button>
+            </div>
         </div>
       </div>
     </div>
-    </>
   );
 };
+
+const StatBox = ({ icon, label, value, sub = "", color }: any) => (
+    <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 flex flex-col items-center justify-center">
+        <span className="text-lg mb-1">{icon}</span>
+        <div className="text-[9px] text-slate-500 uppercase font-bold">{label}</div>
+        <div className={`font-bold text-sm ${color}`}>
+            {value}<span className="text-[9px] text-slate-600 font-normal">{sub}</span>
+        </div>
+    </div>
+);
 
 export default BuildingInspect;

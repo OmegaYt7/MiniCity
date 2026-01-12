@@ -1,5 +1,8 @@
-import React from 'react';
+
+import React, { useState } from 'react';
 import { useGame } from '../../context/GameContext';
+import { audioService } from '../../services/audioService';
+import { ProfileModal, XpExchangeModal } from './Modals';
 
 interface HUDProps {
   isMuted: boolean;
@@ -7,7 +10,11 @@ interface HUDProps {
 }
 
 const HUD: React.FC<HUDProps> = ({ isMuted, onToggleMute }) => {
-  const { state } = useGame();
+  const { state, populationStats, totalIncome, timeOfDay, actions } = useGame();
+  
+  const [showProfile, setShowProfile] = useState(false);
+  const [showXpExchange, setShowXpExchange] = useState(false);
+  const [lastClickTime, setLastClickTime] = useState(0);
 
   const formatNumber = (num: number) => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -15,56 +22,106 @@ const HUD: React.FC<HUDProps> = ({ isMuted, onToggleMute }) => {
     return num.toString();
   };
 
+  const handleTimeClick = () => {
+      // Debounce to prevent crazy spinning
+      const now = Date.now();
+      if (now - lastClickTime > 300) {
+          actions.cycleTime();
+          setLastClickTime(now);
+      }
+  };
+
+  // Clock calculations
+  const isDay = timeOfDay >= 6 && timeOfDay < 18;
+  const cycleProgress = isDay 
+    ? (timeOfDay - 6) / 12 
+    : (timeOfDay >= 18 ? timeOfDay - 18 : timeOfDay + 6) / 12; 
+
+  const rotation = -90 + (cycleProgress * 180); 
+
   return (
-    <div className="absolute top-0 left-0 w-full p-4 pointer-events-none flex justify-between items-start z-10 safe-area-top">
-      {/* Top Left: Resources */}
+    <>
+    <div className="absolute top-0 left-0 w-full p-4 pointer-events-none flex justify-between items-start z-20 safe-area-top">
+      
+      {/* Top Left: Profile & Coins */}
       <div className="flex flex-col gap-3 pointer-events-auto">
         
-        {/* Coins */}
-        <div className="group flex items-center gap-3 bg-white/90 backdrop-blur-xl px-4 py-2.5 rounded-2xl shadow-lg border border-white/50 transition-transform active:scale-95">
-          <div className="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center text-xl border-2 border-yellow-300 text-yellow-600">
-            💰
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider leading-none mb-0.5">Монеты</span>
-            <span className="text-xl font-black text-slate-800 leading-none font-mono tracking-tight">{formatNumber(state.coins)}</span>
-          </div>
-        </div>
+        {/* Profile Button */}
+        <button 
+            onClick={() => { audioService.playClick(); setShowProfile(true); }}
+            className="w-10 h-10 rounded-xl bg-slate-900/90 border border-slate-700 flex items-center justify-center text-xl shadow-lg active:scale-95 transition-transform"
+        >
+            👤
+        </button>
 
-        {/* Population */}
-        <div className="group flex items-center gap-3 bg-white/90 backdrop-blur-xl px-4 py-2.5 rounded-2xl shadow-lg border border-white/50 transition-transform active:scale-95">
-          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-xl border-2 border-blue-300 text-blue-600">
-            👥
-          </div>
-          <div className="flex flex-col">
-             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider leading-none mb-0.5">Жители</span>
-            <span className="text-xl font-black text-slate-800 leading-none font-mono tracking-tight">{formatNumber(state.population)}</span>
-          </div>
+        {/* Resources Block */}
+        <div className="flex flex-col gap-1">
+             {/* COINS */}
+             <div className="bg-slate-900/90 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-xl border border-slate-700 min-w-[120px]">
+                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider leading-none mb-1">Монеты</div>
+                <div className="text-xl font-black text-yellow-400 leading-none font-mono drop-shadow-sm">
+                    {formatNumber(state.coins)} 💰
+                </div>
+             </div>
+             
+             {/* INCOME (Separate) */}
+             <div className="bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700/50 self-start">
+                 <span className="text-xs font-bold text-green-400">+{totalIncome}/мин</span>
+             </div>
         </div>
       </div>
 
-      {/* Top Right: Status & Settings */}
+      {/* Top Right: Status & Clock */}
       <div className="flex flex-col items-end gap-3 pointer-events-auto">
-        {/* Level / XP */}
-        <div className="flex items-center gap-3 bg-white/90 backdrop-blur-xl pl-4 pr-2 py-2 rounded-2xl shadow-lg border border-white/50">
+        
+        {/* XP / Level (Clickable) */}
+        <button 
+            onClick={() => { audioService.playClick(); setShowXpExchange(true); }}
+            className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-xl pl-4 pr-2 py-2 rounded-2xl shadow-xl border border-slate-700 active:scale-95 transition-transform group"
+        >
            <div className="flex flex-col items-end mr-1">
-             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider leading-none mb-0.5">Уровень {state.level}</span>
-             <span className="text-lg font-black text-slate-800 leading-none">{formatNumber(state.xp)} XP</span>
+             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider leading-none mb-0.5 group-hover:text-purple-300 transition-colors">Уровень {state.level}</span>
+             <span className="text-lg font-black text-slate-100 leading-none drop-shadow-sm">{formatNumber(state.xp)} XP</span>
            </div>
-           <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold text-sm border-2 border-purple-300">
+           <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400 font-bold text-sm border border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.3)]">
              ⭐
            </div>
+        </button>
+
+        {/* Population */}
+        <div className="bg-slate-900/90 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-xl border border-slate-700 flex flex-col items-end">
+             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider leading-none mb-1">Жители</span>
+             <div className="flex items-baseline gap-1 font-mono">
+                 <span className="text-xl font-black text-blue-400">{formatNumber(populationStats.current)}</span>
+                 <span className="text-sm text-slate-500 font-bold">/</span>
+                 <span className="text-sm text-slate-500 font-bold">{formatNumber(populationStats.max)}</span>
+             </div>
         </div>
 
-        {/* Settings / Mute */}
+        {/* Day/Night Clock UI */}
         <button 
-          onClick={onToggleMute}
-          className="w-10 h-10 bg-white/90 backdrop-blur-xl rounded-full flex items-center justify-center shadow-lg border border-white/50 text-slate-600 hover:text-slate-900 transition-all active:scale-90"
+            onClick={handleTimeClick}
+            className="w-14 h-14 bg-slate-900/90 backdrop-blur-xl rounded-full shadow-lg border border-slate-700 relative overflow-hidden flex items-center justify-center active:scale-95 transition-transform"
         >
-          {isMuted ? '🔇' : '🔊'}
+            <div className={`absolute inset-0 transition-colors duration-1000 ${isDay ? 'bg-sky-400/20' : 'bg-indigo-900/40'}`}></div>
+            <div className="absolute bottom-0 w-full h-1/2 bg-slate-800/50 border-t border-slate-600"></div>
+            <div 
+                className="absolute w-full h-full flex items-center justify-center transition-transform duration-1000 ease-linear"
+                style={{ transform: `rotate(${rotation}deg)` }}
+            >
+                <div 
+                    className={`absolute top-2 w-3 h-3 rounded-full shadow-[0_0_8px_currentColor] transition-colors duration-500 ${isDay ? 'bg-yellow-400 text-yellow-400' : 'bg-slate-200 text-slate-200'}`}
+                ></div>
+            </div>
+            <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-transparent via-white/5 to-white/10 pointer-events-none"></div>
         </button>
       </div>
     </div>
+
+    {/* Modals */}
+    {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
+    {showXpExchange && <XpExchangeModal onClose={() => setShowXpExchange(false)} />}
+    </>
   );
 };
 
