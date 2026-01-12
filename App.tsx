@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { GameProvider, useGame } from './context/GameContext';
 import WorldMap from './components/WorldMap';
@@ -32,7 +33,7 @@ function App() {
            <div className="text-8xl animate-bounce-gentle filter drop-shadow-[0_0_20px_rgba(56,189,248,0.5)]">🏗️</div>
            <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-16 h-4 bg-black/30 rounded-[100%] blur-sm animate-pulse"></div>
         </div>
-        <h1 className="text-3xl font-black tracking-[0.2em] text-slate-200 mb-8 drop-shadow-lg">CITY BUILDER</h1>
+        <h1 className="text-3xl font-black tracking-[0.2em] text-slate-200 mb-8 drop-shadow-lg">МОЙ ГОРОД</h1>
         
         <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden">
           <div 
@@ -48,21 +49,11 @@ function App() {
   return (
     <GameProvider>
       <div className="relative w-full h-full overflow-hidden bg-[#0f172a] select-none font-sans text-slate-200">
-        
-        {/* Layer 1: The Game World (Canvas) */}
         <WorldMap onInteract={() => {}} />
-
-        {/* Layer 2: UI Overlays */}
-        {/* We pass the mute state to HUD to keep controls unified */}
         <HUD isMuted={isMuted} onToggleMute={toggleMute} />
-        
-        {/* Layer 3: Interactive Panels */}
         <ConstructionMenu />
         <BuildingInspect />
-
-        {/* Placement Instructions */}
         <InstructionOverlay />
-        
       </div>
     </GameProvider>
   );
@@ -70,23 +61,47 @@ function App() {
 
 // Helper component to show hints based on mode
 const InstructionOverlay = () => {
-  const { mode, actions } = useGame();
+  const { mode, actions, ghostPosition } = useGame();
   
   if (mode === 'PLACING') {
     return (
-      <div className="absolute bottom-8 left-0 w-full flex flex-col items-center gap-4 pointer-events-none z-40">
-        <div className="bg-slate-900/90 backdrop-blur-md text-slate-200 px-6 py-3 rounded-2xl shadow-2xl font-bold border border-slate-700 flex items-center gap-2 animate-pulse">
-          <span>👇</span> Нажмите на карту для постройки
-        </div>
-        <button 
-            onClick={() => {
-                actions.setMode('VIEW');
-                actions.selectBuildingDef(null);
-            }}
-            className="pointer-events-auto bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-8 rounded-full shadow-lg shadow-red-900/50 transition-transform active:scale-95 border border-red-400/20"
-        >
-            Отмена
-        </button>
+      <div className="absolute bottom-24 left-0 w-full flex flex-col items-center gap-4 pointer-events-none z-40">
+        {!ghostPosition && (
+            <div className="bg-slate-900/90 backdrop-blur-md text-slate-200 px-6 py-3 rounded-2xl shadow-2xl font-bold border border-slate-700 flex items-center gap-2 animate-pulse">
+            <span>👇</span> Выберите место на карте
+            </div>
+        )}
+
+        {ghostPosition && (
+            <div className="pointer-events-auto flex gap-3 animate-in slide-in-from-bottom-5 fade-in duration-200">
+                <button 
+                    onClick={() => actions.cancelBuilding()}
+                    className="bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg shadow-red-900/50"
+                >
+                    Отмена
+                </button>
+                <button 
+                    onClick={() => actions.confirmBuilding()}
+                    disabled={!ghostPosition.valid}
+                    className={`font-bold py-3 px-8 rounded-xl shadow-lg transition-all ${
+                        ghostPosition.valid 
+                        ? 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/50 scale-105' 
+                        : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                    }`}
+                >
+                    Построить
+                </button>
+            </div>
+        )}
+
+        {!ghostPosition && (
+            <button 
+                onClick={() => actions.cancelBuilding()}
+                className="pointer-events-auto bg-slate-800 text-slate-300 font-bold py-2 px-8 rounded-full shadow-lg border border-slate-600"
+            >
+                Отмена
+            </button>
+        )}
       </div>
     );
   }

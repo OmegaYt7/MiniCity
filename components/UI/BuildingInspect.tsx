@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { useGame } from '../../context/GameContext';
 import { BUILDINGS } from '../../constants';
@@ -17,11 +18,10 @@ const BuildingInspect: React.FC = () => {
   };
 
   const level = selectedInstance.level;
-  const maxLevel = def.maxLevel || 3;
+  const maxLevel = def.maxLevel || 5;
   const nextLevel = level + 1;
   const upgradeCost = Math.floor(def.price * nextLevel * 0.5);
   
-  // Calculate Deltas
   const currentIncome = Math.floor(def.income * (1 + (level - 1) * 0.5));
   const nextIncome = Math.floor(def.income * (1 + (nextLevel - 1) * 0.5));
   
@@ -30,13 +30,10 @@ const BuildingInspect: React.FC = () => {
   const nextPopVal = Math.abs(def.population * nextLevel);
   const popDelta = nextPopVal - currentPopVal;
 
-  // Validation
   const hasMoney = state.coins >= upgradeCost;
-  // If residential, upgrade is always allowed (gives capacity).
-  // If commercial/industrial, upgrade requires available workers (Capacity - Current > Increase)
   const hasWorkers = isResidential 
     ? true 
-    : (populationStats.maxCapacity - populationStats.currentWorkers) >= popDelta;
+    : populationStats.free >= popDelta;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -44,14 +41,13 @@ const BuildingInspect: React.FC = () => {
 
       <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         
-        {/* Header */}
         <div 
             className="h-32 w-full flex items-center justify-center relative"
             style={{ background: `linear-gradient(to bottom, ${def.imageColor}44, #0f172a)` }}
         >
             <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
-            <span className="text-6xl filter drop-shadow-[0_0_15px_rgba(255,255,255,0.4)] animate-float">
-                {def.lightRadius ? '💡' : '🏠'}
+            <span className="text-6xl filter drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
+                {def.lightRadius ? '💡' : (isResidential ? '🏠' : '🏢')}
             </span>
             <button onClick={handleCancel} className="absolute top-4 right-4 bg-black/30 hover:bg-black/50 text-white rounded-full w-8 h-8 flex items-center justify-center backdrop-blur-md">✕</button>
             
@@ -62,7 +58,6 @@ const BuildingInspect: React.FC = () => {
             </div>
         </div>
 
-        {/* Content */}
         <div className="p-6">
             <div className="flex justify-between items-start mb-2">
                 <div>
@@ -75,12 +70,11 @@ const BuildingInspect: React.FC = () => {
                 {def.description}
             </p>
 
-            {/* Stats */}
             <div className="grid grid-cols-3 gap-2 mb-6">
-                 {def.income > 0 && <StatBox icon="⚡" label="Доход" value={`+${currentIncome}`} sub=" /м" color="text-green-400" />}
+                 {def.income > 0 && <StatBox icon="⚡" label="Доход" value={`+${currentIncome}`} sub="/м" color="text-green-400" />}
                  
                  {isResidential ? (
-                     <StatBox icon="🏠" label="Места" value={`+${currentPopVal}`} color="text-blue-400" />
+                     <StatBox icon="🏠" label="Жилье" value={`+${currentPopVal}`} color="text-blue-400" />
                  ) : (
                     def.population !== 0 ? <StatBox icon="👷" label="Рабочие" value={`-${currentPopVal}`} color="text-orange-400" /> : null
                  )}
@@ -88,16 +82,15 @@ const BuildingInspect: React.FC = () => {
                  <StatBox icon="⭐" label="XP" value={def.xp * level} color="text-purple-400" />
             </div>
 
-            {/* UPGRADE */}
             {level < maxLevel && (
                 <div className="bg-slate-800/50 rounded-xl p-3 mb-4 border border-slate-700">
                     <div className="flex justify-between items-center mb-2">
                         <span className="text-xs font-bold text-slate-300 uppercase">След. уровень</span>
                         <div className="text-xs">
-                             {def.income > 0 && <span className="text-green-400 mr-2">+{nextIncome - currentIncome} доход</span>}
+                             {def.income > 0 && <span className="text-green-400 mr-2">+{nextIncome - currentIncome} монет</span>}
                              {isResidential 
                                 ? <span className="text-blue-400">+{popDelta} жилья</span>
-                                : (def.population !== 0 && <span className="text-orange-400">-{popDelta} рабочих</span>)
+                                : (def.population !== 0 && <span className="text-orange-400">-{popDelta} раб.</span>)
                              }
                         </div>
                     </div>
@@ -108,7 +101,7 @@ const BuildingInspect: React.FC = () => {
                         </div>
                         {!isResidential && def.population !== 0 && (
                             <div className={`px-2 py-1 rounded border ${hasWorkers ? 'border-blue-500/30 bg-blue-500/10 text-blue-200' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
-                                👷 Треб. {popDelta} своб.
+                                👷 Надо {popDelta} своб.
                             </div>
                         )}
                     </div>
@@ -130,7 +123,7 @@ const BuildingInspect: React.FC = () => {
             
             {level >= maxLevel && (
                 <div className="w-full py-3 bg-slate-800 rounded-lg text-center text-yellow-500 font-bold border border-yellow-500/20 mb-4">
-                    ✨ МАКСИМУМ
+                    ✨ МАКС. УРОВЕНЬ
                 </div>
             )}
 
@@ -139,7 +132,7 @@ const BuildingInspect: React.FC = () => {
                     onClick={() => actions.startMovingBuilding(selectedInstance.id)}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-lg font-bold transition-colors border border-slate-700"
                 >
-                    🔄 Переместить
+                    🔄 Двигать
                 </button>
                 <button 
                     onClick={() => actions.destroyBuilding(selectedInstance.id)}

@@ -8,7 +8,7 @@ interface WorldMapProps {
   onInteract: () => void;
 }
 
-// Helper: Deterministic pseudo-random for stable lighting
+// Deterministic random for lighting consistency
 const pseudoRandom = (x: number, y: number, seed: number) => {
     const n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453123;
     return n - Math.floor(n);
@@ -21,29 +21,36 @@ const drawBuildingDetails = (ctx: CanvasRenderingContext2D, def: any, x: number,
     if (def.category === BuildingCategory.RESIDENTIAL || def.category === BuildingCategory.COMMERCIAL || def.category === BuildingCategory.INDUSTRIAL) {
         const rows = Math.floor(h / 15);
         const cols = Math.floor(w / 15);
-        if (rows <= 0 || cols <= 0) return;
-
-        const pad = 4;
-        const winW = (w - (cols+1)*pad) / cols;
-        const winH = (h - (rows+1)*pad) / rows;
         
-        if (winW <= 0 || winH <= 0) return;
+        if (rows > 0 && cols > 0) {
+            const pad = 4;
+            const winW = (w - (cols+1)*pad) / cols;
+            const winH = (h - (rows+1)*pad) / rows;
+            
+            if (winW > 0 && winH > 0) {
+                // Randomly decide if this entire building has lights on tonight
+                const buildingSeed = worldX * 100 + worldY;
+                const buildingLit = pseudoRandom(buildingSeed, 0, 0) > 0.4; // 60% chance to be dark
 
-        for(let r=0; r<rows; r++) {
-            for(let c=0; c<cols; c++) {
-                // Stable night lighting
-                const seed = (worldX + c) * 100 + (worldY + r);
-                const isLit = isNight && (pseudoRandom(seed, 0, def.price) > 0.4); 
-                
-                ctx.fillStyle = isLit ? '#fef08a' : '#1e293b'; 
-                if (!isNight) ctx.fillStyle = '#334155'; // Dark blue/gray day windows
+                for(let r=0; r<rows; r++) {
+                    for(let c=0; c<cols; c++) {
+                        let isLit = false;
+                        if (isNight && buildingLit) {
+                             const winSeed = buildingSeed + c * 10 + r;
+                             // Individual window variation if building is active
+                             isLit = pseudoRandom(winSeed, 0, 0) > 0.3; 
+                        }
+                        
+                        ctx.fillStyle = isLit ? '#fef08a' : '#1e293b'; 
+                        if (!isNight) ctx.fillStyle = '#334155'; 
 
-                ctx.fillRect(x + pad + c*(winW+pad), y + pad + r*(winH+pad), winW, winH);
+                        ctx.fillRect(x + pad + c*(winW+pad), y + pad + r*(winH+pad), winW, winH);
+                    }
+                }
             }
         }
     }
     
-    // Roof Features (Industrial)
     if (def.category === BuildingCategory.INDUSTRIAL) {
         ctx.fillStyle = '#475569';
         ctx.beginPath();
@@ -55,7 +62,6 @@ const drawBuildingDetails = (ctx: CanvasRenderingContext2D, def: any, x: number,
         ctx.fill();
     }
     
-    // AC Unit (Residential)
     if (def.category === BuildingCategory.RESIDENTIAL) {
         ctx.fillStyle = '#64748b';
         ctx.fillRect(x + 5, y + 5, 10, 6);
@@ -64,7 +70,7 @@ const drawBuildingDetails = (ctx: CanvasRenderingContext2D, def: any, x: number,
 
 const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { mapData, buildings, effects, mode, selectedBuildingDef, movingInstanceId, actions, timeOfDay } = useGame();
+  const { mapData, buildings, effects, mode, selectedBuildingDef, movingInstanceId, actions, timeOfDay, ghostPosition } = useGame();
   
   const [camera, setCamera] = useState({ 
     x: -(mapData.width * TILE_SIZE) / 2 + window.innerWidth / 2, 
@@ -76,24 +82,46 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
   const prevPinchInfo = useRef<{dist: number, center: {x: number, y: number}} | null>(null);
   const isDragging = useRef(false);
   const lastPanPos = useRef({ x: 0, y: 0 }); 
-  const [hoverTile, setHoverTile] = useState({ x: -1, y: -1 });
 
-  const getAmbientColor = (hour: number) => {
-    if (hour >= 20 || hour < 5) return { r: 10, g: 15, b: 40, a: 0.6 }; 
-    if (hour >= 8 && hour < 17) return { r: 255, g: 255, b: 255, a: 0 }; 
+  // Day/Night Cycle Phases
+  // 0-6: Sunrise (Dark Blue to Orange)
+  // 6-12: Day (Clear)
+  // 12-18: Sunset (Clear to Orange/Purple)
+  // 18-24: Night (Dark Blue)
+  const getAmbientColor = (t: number) => {
+    // Night (18-24 and 0-6 are handled by phases but simple logic below)
     
-    if (hour >= 5 && hour < 8) {
-        const t = (hour - 5) / 3; 
-        return { r: 10 + t*20, g: 15 + t*20, b: 40 + t*10, a: 0.6 * (1-t) };
+    if (t >= 0 && t < 6) { 
+        // Sunrise: 0 (Night) -> 6 (Day)
+        const p = t / 6; // 0 to 1
+        // Start: 10, 15, 40, 0.6
+        // End: 255, 200, 150, 0.0
+        return { 
+            r: 10 + p * (255-10), 
+            g: 15 + p * (200-15), 
+            b: 40 + p * (150-40), 
+            a: 0.6 * (1-p)
+        };
     }
-    if (hour >= 17 && hour < 20) {
-        const t = (hour - 17) / 3;
-        return { r: 255 - t*200, g: 150 - t*100, b: 50, a: t * 0.5 };
+    if (t >= 6 && t < 12) {
+        // Day
+        return { r: 255, g: 255, b: 255, a: 0 };
     }
-    return { r: 0, g: 0, b: 0, a: 0 };
+    if (t >= 12 && t < 18) {
+        // Sunset: 12 (Day) -> 18 (Night start)
+        const p = (t - 12) / 6;
+        return {
+            r: 255, // Stay warm
+            g: 255 - p * 150, 
+            b: 255 - p * 200, 
+            a: p * 0.5 
+        };
+    }
+    // Night 18-24
+    return { r: 10, g: 15, b: 40, a: 0.6 };
   };
 
-  const isNight = timeOfDay >= 19 || timeOfDay < 6;
+  const isNight = timeOfDay >= 18 || timeOfDay < 6;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -124,7 +152,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
           const endX = Math.min(mapData.width, endCol);
           const endY = Math.min(mapData.height, endRow);
 
-          // 2. Tiles
+          // Tiles
           for (let y = startY; y < endY; y++) {
             if (!mapData.tiles[y]) continue;
             for (let x = startX; x < endX; x++) {
@@ -142,7 +170,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
                 ctx.fillStyle = COLORS.ROAD; 
                 ctx.fillRect(posX, posY, TILE_SIZE + 1, TILE_SIZE + 1);
                 
-                // Road Markings
                 ctx.fillStyle = COLORS.ROAD_MARKING;
                 const neighborRight = mapData.tiles[y][x+1] === TileType.ROAD;
                 const neighborBottom = mapData.tiles[y+1]?.[x] === TileType.ROAD;
@@ -171,10 +198,9 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             }
           }
 
-          // 3. Decorations
+          // Decorations
           mapData.decorations.forEach(d => {
             if(d.x < startX || d.x > endX || d.y < startY || d.y > endY) return;
-
             const px = d.x * TILE_SIZE + TILE_SIZE/2;
             const py = d.y * TILE_SIZE + TILE_SIZE/2;
             
@@ -187,36 +213,23 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
                 ctx.beginPath();
                 ctx.arc(px, py - 5, TILE_SIZE * 0.3, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.fillStyle = '#4ade80';
-                ctx.beginPath();
-                ctx.arc(px - 5, py - 10, TILE_SIZE * 0.15, 0, Math.PI * 2);
-                ctx.fill();
             } else if (d.type === 'ROCK') {
                 ctx.fillStyle = '#475569';
                 ctx.beginPath();
                 ctx.ellipse(px, py + 10, 12, 8, 0, 0, Math.PI*2);
                 ctx.fill();
-                ctx.fillStyle = '#94a3b8';
-                ctx.beginPath();
-                ctx.ellipse(px - 2, py + 8, 8, 5, 0, 0, Math.PI*2);
-                ctx.fill();
             } else if (d.type === 'BUSH') {
                  ctx.fillStyle = '#166534';
                  ctx.beginPath();
-                 ctx.arc(px + 5, py + 5, 10, 0, Math.PI * 2);
-                 ctx.arc(px - 5, py + 5, 9, 0, Math.PI * 2);
-                 ctx.arc(px, py - 2, 10, 0, Math.PI * 2);
+                 ctx.arc(px, py + 2, 12, 0, Math.PI * 2);
                  ctx.fill();
             }
           });
 
-          // 4. Buildings
-          // Use safe slice to avoid mutating original state in sort (though sort is in-place, mapData buildings from context might be read-only frozen in strict mode)
+          // Buildings
           const sortedBuildings = [...buildings].sort((a, b) => a.y - b.y);
-          
           sortedBuildings.forEach(b => {
             if (b.id === movingInstanceId) return;
-
             const def = BUILDINGS.find(d => d.id === b.defId);
             if (!def) return;
             
@@ -225,7 +238,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             const w = def.width * TILE_SIZE;
             const h = def.height * TILE_SIZE;
 
-            // Check viewport visibility roughly
             if (px + w < (-camera.x/camera.zoom) || px > (-camera.x/camera.zoom) + (canvas.width/camera.zoom)) return;
             if (py + h < (-camera.y/camera.zoom) || py > (-camera.y/camera.zoom) + (canvas.height/camera.zoom)) return;
 
@@ -239,75 +251,41 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             const baseDepth = 20;
             const depth = baseDepth + levelHeight; 
             
-            // Draw Body
             ctx.fillStyle = def.imageColor; 
-            // Darker side
             ctx.fillStyle = adjustColor(def.imageColor, -40);
             ctx.fillRect(px + 4, py + 4, w - 8, h - 8); 
-            // Main face
             ctx.fillStyle = def.imageColor;
             ctx.fillRect(px + 4, py + 4 - depth, w - 8, h - 8);
             
-            // 3D Side shading
             ctx.fillStyle = 'rgba(0,0,0,0.2)';
-            ctx.fillRect(px + 4, py + 4 - depth, 4, h - 8); // Left shade
+            ctx.fillRect(px + 4, py + 4 - depth, 4, h - 8); 
             ctx.fillStyle = 'rgba(255,255,255,0.1)';
-            ctx.fillRect(px + 4, py + 4 - depth, w - 8, 4); // Top highlight
+            ctx.fillRect(px + 4, py + 4 - depth, w - 8, 4); 
 
-            // Details
             drawBuildingDetails(ctx, def, px + 4, py + 4 - depth, w - 8, h - 8, isNight, b.x, b.y);
-
-            // Level Stars
-            if (camera.zoom > 0.6 && b.level > 1) {
-                ctx.fillStyle = '#fbbf24';
-                const spacing = 10;
-                const totalW = (b.level - 1) * spacing;
-                const startX = px + w/2 - totalW/2;
-                for(let i=0; i<b.level; i++) {
-                    ctx.beginPath();
-                    ctx.arc(startX + i*spacing - spacing/2, py - depth - 12, 3, 0, Math.PI*2);
-                    ctx.fill();
-                }
-            }
           });
 
-          // 5. Destruction Effects
+          // Destruction
           const now = Date.now();
           effects.forEach(eff => {
              const elapsed = now - eff.startTime;
-             const duration = 800;
-             if (elapsed < duration) {
-                 const progress = elapsed / duration;
+             if (elapsed < 800) {
+                 const progress = elapsed / 800;
                  const px = eff.x * TILE_SIZE;
                  const py = eff.y * TILE_SIZE;
                  
-                 const scale = 1 - progress;
-                 const alpha = 1 - progress;
-                 
                  ctx.save();
-                 ctx.globalAlpha = alpha;
+                 ctx.globalAlpha = 1 - progress;
                  ctx.translate(px + TILE_SIZE/2, py + TILE_SIZE/2);
-                 ctx.scale(scale, scale);
-                 
                  ctx.fillStyle = '#94a3b8';
                  ctx.beginPath();
-                 ctx.arc(0, 0, TILE_SIZE * 0.8, 0, Math.PI * 2);
+                 ctx.arc(0, 0, TILE_SIZE * 0.8 * progress + 10, 0, Math.PI * 2);
                  ctx.fill();
-                 
-                 for(let i=0; i<8; i++) {
-                    const angle = (i / 8) * Math.PI * 2 + progress * 2;
-                    const dist = progress * TILE_SIZE * 1.5;
-                    const size = (1-progress) * 10;
-                    ctx.fillStyle = i % 2 === 0 ? '#475569' : '#cbd5e1';
-                    ctx.beginPath();
-                    ctx.arc(Math.cos(angle)*dist, Math.sin(angle)*dist, size, 0, Math.PI*2);
-                    ctx.fill();
-                 }
                  ctx.restore();
              }
           });
 
-          // 6. Day/Night Overlay
+          // Day/Night Overlay
           const ambient = getAmbientColor(timeOfDay);
           if (ambient.a > 0) {
             ctx.save();
@@ -317,71 +295,66 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             ctx.restore();
           }
 
-          // 7. Light Sources
+          // Light Sources
           if (isNight) {
               ctx.save();
               ctx.globalCompositeOperation = 'screen';
               buildings.forEach(b => {
                  const def = BUILDINGS.find(d => d.id === b.defId);
                  if (def && def.lightRadius && b.id !== movingInstanceId) {
-                     const cx = (b.x + def.width/2) * TILE_SIZE;
-                     const cy = (b.y + def.height/2) * TILE_SIZE;
-                     const r = def.lightRadius * TILE_SIZE;
-                     
-                     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-                     // Reduced opacity for subtle "lamp" look
-                     g.addColorStop(0, def.lightColor ? def.lightColor.replace('1.0', '0.25') : 'rgba(255,255,200,0.25)'); 
-                     g.addColorStop(1, 'rgba(0,0,0,0)');
-                     
-                     ctx.fillStyle = g;
-                     ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+                     // Check if this building has lights on (using same seed as windows)
+                     const seed = b.x * 100 + b.y;
+                     if (pseudoRandom(seed, 0, 0) > 0.4) {
+                         const cx = (b.x + def.width/2) * TILE_SIZE;
+                         const cy = (b.y + def.height/2) * TILE_SIZE;
+                         const r = def.lightRadius * TILE_SIZE;
+                         
+                         const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+                         g.addColorStop(0, def.lightColor ? def.lightColor.replace('1.0', '0.25') : 'rgba(255,255,200,0.25)'); 
+                         g.addColorStop(1, 'rgba(0,0,0,0)');
+                         
+                         ctx.fillStyle = g;
+                         ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+                     }
                  }
               });
               ctx.restore();
           }
 
-          // 8. Ghost Building
-          if (mode === 'PLACING' && selectedBuildingDef && hoverTile.x >= 0) {
+          // Ghost Building (Placement Mode)
+          if (mode === 'PLACING' && selectedBuildingDef && ghostPosition) {
              const def = selectedBuildingDef;
-             const gx = hoverTile.x;
-             const gy = hoverTile.y;
+             const { x: gx, y: gy, valid } = ghostPosition;
              
              const px = gx * TILE_SIZE;
              const py = gy * TILE_SIZE;
              const w = def.width * TILE_SIZE;
              const h = def.height * TILE_SIZE;
 
-             let valid = true;
-             if (gx < 0 || gy < 0 || gx + def.width > mapData.width || gy + def.height > mapData.height) valid = false;
-             else {
-                 for(let i=0; i<def.width; i++) {
-                    for(let j=0; j<def.height; j++) {
-                        const tile = mapData.tiles[gy+j]?.[gx+i];
-                        if (tile !== TileType.GRASS && tile !== TileType.SAND) valid = false;
-                    }
-                }
-                buildings.forEach(b => {
-                    if(b.id === movingInstanceId) return;
-                    const bDef = BUILDINGS.find(d => d.id === b.defId)!;
-                    if (gx < b.x + bDef.width && gx + def.width > b.x && gy < b.y + bDef.height && gy + def.height > b.y) valid = false;
-                });
-             }
-
-             ctx.globalAlpha = 0.7;
+             ctx.save();
+             ctx.globalAlpha = 0.8;
+             
+             // Draw base
              ctx.fillStyle = valid ? def.imageColor : COLORS.HIGHLIGHT_INVALID;
              const depth = 20;
              ctx.fillRect(px + 4, py + 4 - depth, w - 8, h - 8);
              
-             ctx.globalAlpha = 0.4;
+             // Draw outline/grid
+             ctx.strokeStyle = valid ? '#ffffff' : '#ff0000';
+             ctx.lineWidth = 2;
+             ctx.strokeRect(px, py, w, h);
+             
+             ctx.globalAlpha = 0.3;
              ctx.fillStyle = valid ? COLORS.HIGHLIGHT_VALID : COLORS.HIGHLIGHT_INVALID;
              ctx.fillRect(px, py, w, h);
-             ctx.globalAlpha = 1.0;
+             
+             ctx.restore();
           }
 
       } catch (err) {
           console.error("Render error:", err);
       } finally {
-          ctx.restore(); // Matches the first save
+          ctx.restore(); 
       }
 
       animationFrameId = requestAnimationFrame(render);
@@ -389,12 +362,10 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
 
     render();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [mapData, buildings, effects, camera, mode, selectedBuildingDef, hoverTile, movingInstanceId, timeOfDay]);
+  }, [mapData, buildings, effects, camera, mode, selectedBuildingDef, ghostPosition, movingInstanceId, timeOfDay]);
 
-  // Color helper logic (placeholder)
   function adjustColor(color: string, amount: number) { return color; }
 
-  // Logic
   const screenToWorld = (sx: number, sy: number) => ({
     x: (sx - camera.x) / camera.zoom,
     y: (sy - camera.y) / camera.zoom,
@@ -425,6 +396,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
     }
 
     if (activePointers.current.size === 2) {
+        // Pinch Zoom
         const points = Array.from(activePointers.current.values()) as {x: number, y: number}[];
         const dist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
         const center = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
@@ -456,13 +428,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             setCamera(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
             lastPanPos.current = { x: e.clientX, y: e.clientY };
         }
-
-        if (mode === 'PLACING') {
-            const worldPos = screenToWorld(e.clientX, e.clientY);
-            const tx = Math.floor(worldPos.x / TILE_SIZE);
-            const ty = Math.floor(worldPos.y / TILE_SIZE);
-            setHoverTile({ x: tx, y: ty });
-        }
     }
   };
 
@@ -482,11 +447,8 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
         const ty = Math.floor(worldPos.y / TILE_SIZE);
 
         if (mode === 'PLACING' && selectedBuildingDef) {
-            const success = actions.placeBuilding(selectedBuildingDef, tx, ty);
-            if (success) { 
-                actions.setMode('VIEW');
-                actions.selectBuildingDef(null);
-            }
+            // Updated: Ghost placement instead of immediate commit
+            actions.setGhostPosition(tx, ty);
         } else if (mode === 'VIEW' || mode === 'INSPECT') {
             const clickedBuilding = [...buildings].reverse().find(b => {
                 const def = BUILDINGS.find(d => d.id === b.defId)!;

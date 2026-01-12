@@ -23,8 +23,8 @@ export interface BuildingDef {
   height: number;
   
   // Population Logic
-  // If Positive: Provides Housing (Capacity)
-  // If Negative: Requires Workers (Usage)
+  // If Positive: Provides Housing (Increases Total & Free)
+  // If Negative: Requires Workers (Decreases Free)
   population: number; 
   
   income: number; // Coins per minute
@@ -37,7 +37,7 @@ export interface BuildingDef {
   lightColor?: string;
 
   // Upgrade Logic
-  maxLevel?: number; // Default 3 if undefined
+  maxLevel?: number; // Default 5
 }
 
 export interface PlacedBuilding {
@@ -60,8 +60,10 @@ export interface TelegramUser {
 export interface GameState {
   playerName: string;
   coins: number;
-  xp: number;
+  xp: number; // Spendable XP
+  totalXpEarned: number; // Lifetime XP for leveling
   level: number;
+  referrals: number;
 }
 
 export interface Decoration {
@@ -93,3 +95,9 @@ export interface CameraState {
 }
 
 export type GameMode = 'VIEW' | 'PLACING' | 'INSPECT';
+
+export interface GhostPosition {
+    x: number;
+    y: number;
+    valid: boolean;
+}
