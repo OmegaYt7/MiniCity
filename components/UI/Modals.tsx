@@ -10,11 +10,7 @@ export const ProfileModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
 
     // Progression Calc
     // Level N requires Total XP approx (Level-1)*500.
-    // Lvl 1->2: 500 total needed.
-    
-    // Previous threshold
     const prevThreshold = (state.level - 1) * 500;
-    // Next threshold
     const nextThreshold = state.level * 500;
     
     const currentProgress = state.totalXpEarned - prevThreshold;
@@ -27,7 +23,7 @@ export const ProfileModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
         audioService.playClick();
     };
 
-    const botName = "MyCityGameBot"; // Placeholder
+    const botName = "TheMiniCityBot"; 
     const userId = telegramUser?.id || (typeof window !== 'undefined' ? (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id : 0);
     const referralLink = userId 
         ? `https://t.me/${botName}/app?startapp=ref_${userId}`
@@ -42,7 +38,7 @@ export const ProfileModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose}></div>
             <div className="relative w-full max-w-sm bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl p-6 animate-in zoom-in-95 duration-200 overflow-y-auto max-h-[90vh]">
-                <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-800 rounded-full text-slate-400 hover:text-white">✕</button>
+                <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-800 rounded-full text-slate-400 hover:text-white transition-transform active:scale-95">✕</button>
                 
                 <h2 className="text-2xl font-black text-white mb-6 flex items-center gap-3">
                     <span className="text-3xl">👤</span> Профиль
@@ -73,7 +69,7 @@ export const ProfileModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                 <div className="mb-6">
                     <div className="flex justify-between text-xs font-bold text-slate-400 mb-1">
                         <span>Уровень {state.level}</span>
-                        <span>{Math.floor(currentProgress)} / {needed} XP</span>
+                        <span>{state.totalXpEarned} / {nextThreshold} Total XP</span>
                     </div>
                     <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700">
                         <div className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500" style={{ width: `${percentage}%` }}></div>
@@ -113,7 +109,7 @@ export const ProfileModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
                         <div className="bg-slate-950 px-3 py-2 rounded text-xs text-slate-500 truncate flex-1 font-mono">
                             {referralLink}
                         </div>
-                        <button onClick={copyRef} className="bg-green-600 px-3 rounded text-white font-bold text-xs">Копия</button>
+                        <button onClick={copyRef} className="bg-green-600 px-3 rounded text-white font-bold text-xs hover:bg-green-500 active:scale-95 transition-transform">Копия</button>
                     </div>
                     <div className="mt-2 text-xs text-slate-500 text-center">
                         Приглашено: <span className="text-white font-bold">{state.referrals}</span>
@@ -138,12 +134,18 @@ export const XpExchangeModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose}></div>
             <div className="relative w-full max-w-sm bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl p-6 animate-in zoom-in-95 duration-200">
-                <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-800 rounded-full text-slate-400 hover:text-white">✕</button>
+                <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-800 rounded-full text-slate-400 hover:text-white transition-transform active:scale-95">✕</button>
                 <div className="text-center mb-6">
                     <div className="text-5xl mb-2">🤝</div>
                     <h2 className="text-2xl font-black text-white">Обмен Опыта</h2>
                     <p className="text-slate-400 text-sm">Получи финансирование за опыт</p>
                 </div>
+                
+                <div className="flex justify-between px-4 mb-4 text-xs font-bold text-slate-400">
+                    <span>Баланс: <span className="text-purple-400">{state.xp} XP</span></span>
+                    <span>Кошелек: <span className="text-yellow-400">{state.coins} 💰</span></span>
+                </div>
+
                 <div className="flex items-center justify-center gap-4 mb-8">
                     <div className="text-center">
                         <div className="text-2xl font-black text-purple-400">{RATE_XP} XP</div>
@@ -177,6 +179,14 @@ export const RewardPopup: React.FC = () => {
     if (activePopup === 'NONE') return null;
 
     const isLevelUp = activePopup === 'LEVEL_UP';
+    const isOffline = activePopup === 'OFFLINE';
+    
+    const formatTime = (seconds: number) => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        if (h > 0) return `${h}ч ${m}м`;
+        return `${m}м`;
+    };
     
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -184,11 +194,11 @@ export const RewardPopup: React.FC = () => {
              <div className="relative w-full max-w-sm bg-gradient-to-br from-slate-900 to-slate-800 border-2 border-yellow-500/50 rounded-3xl shadow-2xl p-8 text-center animate-bounce-gentle">
                 
                 <div className="text-6xl mb-4 filter drop-shadow-[0_0_20px_rgba(234,179,8,0.5)]">
-                    {isLevelUp ? '🎉' : '🎁'}
+                    {isLevelUp ? '🎉' : (isOffline ? '🛌' : '🎁')}
                 </div>
                 
                 <h2 className="text-3xl font-black text-white mb-2 uppercase tracking-wide">
-                    {isLevelUp ? 'Новый Уровень!' : 'Бонус Реферала'}
+                    {isLevelUp ? 'Новый Уровень!' : (isOffline ? 'С возвращением!' : 'Бонус Реферала')}
                 </h2>
                 
                 {isLevelUp && (
@@ -198,12 +208,17 @@ export const RewardPopup: React.FC = () => {
                 )}
 
                 <p className="text-slate-300 mb-6">
-                    {isLevelUp ? 'Твой город растет!' : 'Друг присоединился к игре!'}
+                    {isLevelUp ? 'Твой город растет!' : (isOffline ? `Город работал пока тебя не было (${formatTime(popupData?.timeOfflineSeconds)})` : 'Друг присоединился к игре!')}
                 </p>
 
                 <div className="bg-slate-950/50 rounded-xl p-4 mb-6 border border-white/10">
                     <div className="text-xs uppercase font-bold text-slate-500 mb-1">Награда</div>
-                    <div className="text-2xl font-bold text-green-400">+{popupData?.reward} 💰</div>
+                    <div className="flex flex-col gap-1">
+                        <div className="text-2xl font-bold text-green-400">+{popupData?.reward || popupData?.coins} 💰</div>
+                        {isOffline && popupData?.xp > 0 && (
+                            <div className="text-lg font-bold text-purple-400">+{popupData?.xp} XP</div>
+                        )}
+                    </div>
                 </div>
 
                 <button 

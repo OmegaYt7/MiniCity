@@ -8,7 +8,6 @@ interface WorldMapProps {
   onInteract: () => void;
 }
 
-// Deterministic random for lighting consistency
 const pseudoRandom = (x: number, y: number, seed: number) => {
     const n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453123;
     return n - Math.floor(n);
@@ -17,7 +16,6 @@ const pseudoRandom = (x: number, y: number, seed: number) => {
 const drawBuildingDetails = (ctx: CanvasRenderingContext2D, def: any, x: number, y: number, w: number, h: number, isNight: boolean, worldX: number, worldY: number) => {
     if (!def) return;
     
-    // Windows logic
     if (def.category === BuildingCategory.RESIDENTIAL || def.category === BuildingCategory.COMMERCIAL || def.category === BuildingCategory.INDUSTRIAL) {
         const rows = Math.floor(h / 15);
         const cols = Math.floor(w / 15);
@@ -28,17 +26,13 @@ const drawBuildingDetails = (ctx: CanvasRenderingContext2D, def: any, x: number,
             const winH = (h - (rows+1)*pad) / rows;
             
             if (winW > 0 && winH > 0) {
-                // Randomly decide if this entire building has lights on tonight
-                const buildingSeed = worldX * 100 + worldY;
-                const buildingLit = pseudoRandom(buildingSeed, 0, 0) > 0.4; // 60% chance to be dark
-
                 for(let r=0; r<rows; r++) {
                     for(let c=0; c<cols; c++) {
                         let isLit = false;
-                        if (isNight && buildingLit) {
-                             const winSeed = buildingSeed + c * 10 + r;
-                             // Individual window variation if building is active
-                             isLit = pseudoRandom(winSeed, 0, 0) > 0.3; 
+                        if (isNight) {
+                             // All non-decor buildings now emit light, windows just flicker slightly differently
+                             const winSeed = (worldX * 100 + worldY) + c * 10 + r;
+                             isLit = pseudoRandom(winSeed, 0, 0) > 0.2; // 80% windows on
                         }
                         
                         ctx.fillStyle = isLit ? '#fef08a' : '#1e293b'; 
@@ -82,20 +76,11 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
   const prevPinchInfo = useRef<{dist: number, center: {x: number, y: number}} | null>(null);
   const isDragging = useRef(false);
   const lastPanPos = useRef({ x: 0, y: 0 }); 
+  const [hoverTile, setHoverTile] = useState({ x: -1, y: -1 });
 
-  // Day/Night Cycle Phases
-  // 0-6: Sunrise (Dark Blue to Orange)
-  // 6-12: Day (Clear)
-  // 12-18: Sunset (Clear to Orange/Purple)
-  // 18-24: Night (Dark Blue)
   const getAmbientColor = (t: number) => {
-    // Night (18-24 and 0-6 are handled by phases but simple logic below)
-    
     if (t >= 0 && t < 6) { 
-        // Sunrise: 0 (Night) -> 6 (Day)
-        const p = t / 6; // 0 to 1
-        // Start: 10, 15, 40, 0.6
-        // End: 255, 200, 150, 0.0
+        const p = t / 6; 
         return { 
             r: 10 + p * (255-10), 
             g: 15 + p * (200-15), 
@@ -104,20 +89,17 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
         };
     }
     if (t >= 6 && t < 12) {
-        // Day
         return { r: 255, g: 255, b: 255, a: 0 };
     }
     if (t >= 12 && t < 18) {
-        // Sunset: 12 (Day) -> 18 (Night start)
         const p = (t - 12) / 6;
         return {
-            r: 255, // Stay warm
+            r: 255, 
             g: 255 - p * 150, 
             b: 255 - p * 200, 
             a: p * 0.5 
         };
     }
-    // Night 18-24
     return { r: 10, g: 15, b: 40, a: 0.6 };
   };
 
@@ -132,7 +114,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
     let animationFrameId: number;
 
     const render = () => {
-      // CLEAR
       ctx.fillStyle = COLORS.WATER;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -141,7 +122,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
           ctx.translate(camera.x, camera.y);
           ctx.scale(camera.zoom, camera.zoom);
 
-          // Map Bounds
           const startCol = Math.floor((-camera.x / camera.zoom) / TILE_SIZE);
           const endCol = startCol + (canvas.width / camera.zoom) / TILE_SIZE + 1;
           const startRow = Math.floor((-camera.y / camera.zoom) / TILE_SIZE);
@@ -241,6 +221,10 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             if (px + w < (-camera.x/camera.zoom) || px > (-camera.x/camera.zoom) + (canvas.width/camera.zoom)) return;
             if (py + h < (-camera.y/camera.zoom) || py > (-camera.y/camera.zoom) + (canvas.height/camera.zoom)) return;
 
+            // Hover Check
+            const isHovered = hoverTile.x >= b.x && hoverTile.x < b.x + def.width &&
+                              hoverTile.y >= b.y && hoverTile.y < b.y + def.height;
+
             // Shadow
             ctx.fillStyle = 'rgba(0,0,0,0.3)';
             ctx.beginPath();
@@ -251,6 +235,14 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             const baseDepth = 20;
             const depth = baseDepth + levelHeight; 
             
+            // Hover Pulse
+            if (isHovered && mode === 'VIEW') {
+                const pulse = Math.sin(Date.now() / 200) * 2;
+                ctx.save();
+                ctx.shadowColor = '#ffffff';
+                ctx.shadowBlur = 15 + pulse;
+            }
+
             ctx.fillStyle = def.imageColor; 
             ctx.fillStyle = adjustColor(def.imageColor, -40);
             ctx.fillRect(px + 4, py + 4, w - 8, h - 8); 
@@ -263,9 +255,12 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             ctx.fillRect(px + 4, py + 4 - depth, w - 8, 4); 
 
             drawBuildingDetails(ctx, def, px + 4, py + 4 - depth, w - 8, h - 8, isNight, b.x, b.y);
+
+            if (isHovered && mode === 'VIEW') {
+                ctx.restore();
+            }
           });
 
-          // Destruction
           const now = Date.now();
           effects.forEach(eff => {
              const elapsed = now - eff.startTime;
@@ -285,7 +280,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
              }
           });
 
-          // Day/Night Overlay
           const ambient = getAmbientColor(timeOfDay);
           if (ambient.a > 0) {
             ctx.save();
@@ -295,33 +289,27 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             ctx.restore();
           }
 
-          // Light Sources
           if (isNight) {
               ctx.save();
               ctx.globalCompositeOperation = 'screen';
               buildings.forEach(b => {
                  const def = BUILDINGS.find(d => d.id === b.defId);
                  if (def && def.lightRadius && b.id !== movingInstanceId) {
-                     // Check if this building has lights on (using same seed as windows)
-                     const seed = b.x * 100 + b.y;
-                     if (pseudoRandom(seed, 0, 0) > 0.4) {
-                         const cx = (b.x + def.width/2) * TILE_SIZE;
-                         const cy = (b.y + def.height/2) * TILE_SIZE;
-                         const r = def.lightRadius * TILE_SIZE;
-                         
-                         const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-                         g.addColorStop(0, def.lightColor ? def.lightColor.replace('1.0', '0.25') : 'rgba(255,255,200,0.25)'); 
-                         g.addColorStop(1, 'rgba(0,0,0,0)');
-                         
-                         ctx.fillStyle = g;
-                         ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-                     }
+                     const cx = (b.x + def.width/2) * TILE_SIZE;
+                     const cy = (b.y + def.height/2) * TILE_SIZE;
+                     const r = def.lightRadius * TILE_SIZE;
+                     
+                     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+                     g.addColorStop(0, def.lightColor ? def.lightColor.replace('1.0', '0.25') : 'rgba(255,255,200,0.25)'); 
+                     g.addColorStop(1, 'rgba(0,0,0,0)');
+                     
+                     ctx.fillStyle = g;
+                     ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
                  }
               });
               ctx.restore();
           }
 
-          // Ghost Building (Placement Mode)
           if (mode === 'PLACING' && selectedBuildingDef && ghostPosition) {
              const def = selectedBuildingDef;
              const { x: gx, y: gy, valid } = ghostPosition;
@@ -334,12 +322,10 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
              ctx.save();
              ctx.globalAlpha = 0.8;
              
-             // Draw base
              ctx.fillStyle = valid ? def.imageColor : COLORS.HIGHLIGHT_INVALID;
              const depth = 20;
              ctx.fillRect(px + 4, py + 4 - depth, w - 8, h - 8);
              
-             // Draw outline/grid
              ctx.strokeStyle = valid ? '#ffffff' : '#ff0000';
              ctx.lineWidth = 2;
              ctx.strokeRect(px, py, w, h);
@@ -362,7 +348,7 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
 
     render();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [mapData, buildings, effects, camera, mode, selectedBuildingDef, ghostPosition, movingInstanceId, timeOfDay]);
+  }, [mapData, buildings, effects, camera, mode, selectedBuildingDef, ghostPosition, movingInstanceId, timeOfDay, hoverTile]);
 
   function adjustColor(color: string, amount: number) { return color; }
 
@@ -375,6 +361,12 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
     canvasRef.current?.setPointerCapture(e.pointerId);
     activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     
+    // Also update hover immediately for rapid touches
+    if (activePointers.current.size === 1) {
+        const worldPos = screenToWorld(e.clientX, e.clientY);
+        setHoverTile({ x: Math.floor(worldPos.x / TILE_SIZE), y: Math.floor(worldPos.y / TILE_SIZE) });
+    }
+
     if (activePointers.current.size === 1) {
         onInteract();
         isDragging.current = false;
@@ -396,7 +388,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
     }
 
     if (activePointers.current.size === 2) {
-        // Pinch Zoom
         const points = Array.from(activePointers.current.values()) as {x: number, y: number}[];
         const dist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
         const center = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
@@ -429,6 +420,10 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
             lastPanPos.current = { x: e.clientX, y: e.clientY };
         }
     }
+    
+    // Update Hover
+    const worldPos = screenToWorld(e.clientX, e.clientY);
+    setHoverTile({ x: Math.floor(worldPos.x / TILE_SIZE), y: Math.floor(worldPos.y / TILE_SIZE) });
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
@@ -447,7 +442,6 @@ const WorldMap: React.FC<WorldMapProps> = ({ onInteract }) => {
         const ty = Math.floor(worldPos.y / TILE_SIZE);
 
         if (mode === 'PLACING' && selectedBuildingDef) {
-            // Updated: Ghost placement instead of immediate commit
             actions.setGhostPosition(tx, ty);
         } else if (mode === 'VIEW' || mode === 'INSPECT') {
             const clickedBuilding = [...buildings].reverse().find(b => {

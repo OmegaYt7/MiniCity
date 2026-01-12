@@ -35,6 +35,11 @@ const BuildingInspect: React.FC = () => {
     ? true 
     : populationStats.free >= popDelta;
 
+  let upgradeButtonText = "Улучшить";
+  if (!hasMoney && !hasWorkers) upgradeButtonText = "Нет монет и жителей";
+  else if (!hasMoney) upgradeButtonText = "Нет монет";
+  else if (!hasWorkers) upgradeButtonText = "Нет жителей";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCancel}></div>
@@ -115,7 +120,7 @@ const BuildingInspect: React.FC = () => {
                             : 'bg-slate-700 text-slate-500 cursor-not-allowed'
                         }`}
                     >
-                        <span>Улучшить</span>
+                        <span>{upgradeButtonText}</span>
                         <span className="text-lg">⬆️</span>
                     </button>
                 </div>

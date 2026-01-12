@@ -64,6 +64,7 @@ export interface GameState {
   totalXpEarned: number; // Lifetime XP for leveling
   level: number;
   referrals: number;
+  lastSaveTime: number; // For offline calc
 }
 
 export interface Decoration {
@@ -100,4 +101,10 @@ export interface GhostPosition {
     x: number;
     y: number;
     valid: boolean;
+}
+
+export interface OfflineEarnings {
+    coins: number;
+    xp: number;
+    timeOfflineSeconds: number;
 }

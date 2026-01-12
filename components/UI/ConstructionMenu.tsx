@@ -14,7 +14,7 @@ const CATEGORIES = [
 ];
 
 const ConstructionMenu: React.FC = () => {
-  const { mode, selectedCategory, actions, state } = useGame();
+  const { mode, selectedCategory, actions, state, populationStats } = useGame();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewingBuilding, setViewingBuilding] = useState<BuildingDef | null>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -51,11 +51,30 @@ const ConstructionMenu: React.FC = () => {
         actions.selectBuildingDef(viewingBuilding);
         actions.selectCategory(null);
         setViewingBuilding(null);
-        actions.startMovingBuilding(''); // Init ghost logic
+        actions.startMovingBuilding(''); 
     }
   };
 
-  // Drag Handlers
+  // Validation Logic for Button Text
+  let buttonText = 'Выбрать место';
+  let canBuild = true;
+
+  if (viewingBuilding) {
+      const enoughCoins = state.coins >= viewingBuilding.price;
+      const enoughPop = viewingBuilding.population >= 0 || populationStats.free >= Math.abs(viewingBuilding.population);
+      
+      if (!enoughCoins && !enoughPop) {
+          buttonText = 'Не хватает монет и жителей';
+          canBuild = false;
+      } else if (!enoughCoins) {
+          buttonText = 'Недостаточно монет';
+          canBuild = false;
+      } else if (!enoughPop) {
+          buttonText = 'Недостаточно свободных жителей';
+          canBuild = false;
+      }
+  }
+
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!scrollRef.current) return;
     isDragging.current = false;
@@ -118,7 +137,7 @@ const ConstructionMenu: React.FC = () => {
                         <div 
                             key={b.id}
                             onClick={() => handleCardClick(b)}
-                            className={`flex-shrink-0 w-36 select-none bg-slate-800 border rounded-xl overflow-hidden transition-transform ${canAfford ? 'border-slate-600 hover:border-blue-500' : 'border-red-900/40 opacity-70'}`}
+                            className={`flex-shrink-0 w-36 select-none bg-slate-800 border rounded-xl overflow-hidden transition-transform active:scale-95 ${canAfford ? 'border-slate-600 hover:border-blue-500' : 'border-red-900/40 opacity-70'}`}
                         >
                             <div className="h-24 w-full flex items-center justify-center relative pointer-events-none" style={{background: `linear-gradient(to bottom right, ${b.imageColor}33, #1e293b)`}}>
                                 <div className="w-10 h-10 rounded shadow-md" style={{backgroundColor: b.imageColor}}></div>
@@ -149,7 +168,7 @@ const ConstructionMenu: React.FC = () => {
               <button
                 key={cat.id}
                 onClick={() => handleCategoryClick(cat.id)}
-                className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all duration-200 w-[18%] ${selectedCategory === cat.id ? 'translate-y-[-2px] bg-slate-800 shadow-lg shadow-blue-900/20' : 'opacity-70 hover:opacity-100'}`}
+                className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all duration-200 w-[18%] ${selectedCategory === cat.id ? 'translate-y-[-2px] bg-slate-800 shadow-lg shadow-blue-900/20' : 'opacity-70 hover:opacity-100 hover:scale-105 active:scale-95'}`}
               >
                 <span className="text-2xl filter drop-shadow-sm">{cat.icon}</span>
                 <span className={`text-[9px] uppercase font-bold tracking-tight text-center leading-none ${selectedCategory === cat.id ? 'text-white' : 'text-slate-400'}`}>
@@ -203,14 +222,14 @@ const ConstructionMenu: React.FC = () => {
 
                     <button 
                         onClick={handleBuildConfirm}
-                        disabled={state.coins < viewingBuilding.price}
+                        disabled={!canBuild}
                         className={`w-full py-3 rounded-xl font-bold uppercase tracking-wide transition-all shadow-lg ${
-                            state.coins >= viewingBuilding.price 
+                            canBuild 
                             ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/40 active:scale-95' 
                             : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                         }`}
                     >
-                        {state.coins >= viewingBuilding.price ? 'Выбрать место' : 'Не хватает монет'}
+                        {buttonText}
                     </button>
                 </div>
             </div>

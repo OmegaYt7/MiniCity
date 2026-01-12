@@ -1,8 +1,9 @@
 
 import React, { createContext, useContext, useEffect, useReducer, useCallback, useState, useRef } from 'react';
-import { GameState, MapData, PlacedBuilding, BuildingDef, TileType, GameMode, VisualEffect, TelegramUser, GhostPosition } from '../types';
+import { GameState, MapData, PlacedBuilding, BuildingDef, TileType, GameMode, VisualEffect, TelegramUser, GhostPosition, OfflineEarnings } from '../types';
 import { INITIAL_RESOURCES, generateMap, MAP_SIZE, BUILDINGS } from '../constants';
 import { audioService } from '../services/audioService';
+import { storageService, SaveData } from '../services/storageService';
 
 interface PopulationStats {
   free: number;
@@ -24,8 +25,9 @@ interface GameContextProps {
   populationStats: PopulationStats;
   totalIncome: number;
   timeOfDay: number; // 0-24 Float
-  activePopup: 'NONE' | 'LEVEL_UP' | 'REFERRAL';
+  activePopup: 'NONE' | 'LEVEL_UP' | 'REFERRAL' | 'OFFLINE';
   popupData: any;
+  isLoadingSave: boolean;
   actions: {
     setGhostPosition: (x: number, y: number) => void;
     confirmBuilding: () => boolean;
@@ -48,6 +50,7 @@ interface GameContextProps {
 const GameContext = createContext<GameContextProps | undefined>(undefined);
 
 type Action =
+  | { type: 'LOAD_STATE'; payload: GameState }
   | { type: 'TICK_INCOME' }
   | { type: 'PLACE_BUILDING'; payload: { def: BuildingDef; x: number; y: number } }
   | { type: 'REMOVE_BUILDING'; payload: string }
@@ -55,10 +58,13 @@ type Action =
   | { type: 'ADD_XP'; payload: number }
   | { type: 'SET_NAME'; payload: string }
   | { type: 'EXCHANGE_XP'; payload: { xp: number, coins: number } }
-  | { type: 'REFERRAL_REWARD'; payload: number };
+  | { type: 'REFERRAL_REWARD'; payload: number }
+  | { type: 'OFFLINE_EARNINGS'; payload: { coins: number; xp: number } };
 
 const gameReducer = (state: GameState, action: Action): GameState => {
   switch (action.type) {
+    case 'LOAD_STATE':
+        return { ...action.payload };
     case 'ADD_COINS':
       return { ...state, coins: Math.max(0, Math.floor(state.coins + action.payload)) };
     case 'ADD_XP':
@@ -66,20 +72,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
       const newSpendableXp = state.xp + earnedXp;
       const newTotalXp = state.totalXpEarned + earnedXp;
       
-      // Cumulative Level Logic
-      // Level N requires N*500 XP total accumulated
-      // Check if current Total XP is enough for Next Level
-      // If Total XP >= (Level+1) * 500, then Level Up
-      
-      let calcLevel = 1;
-      let costForNext = 500;
-      // Simple linear cumulative: Lvl 1=0, Lvl 2=500, Lvl 3=1000...
-      // OR Prompt says: "Total XP required... does not need to be shown globally"
-      // Let's use: Total XP / 500 + 1 (floor).
-      // Example: 0 XP = Level 1. 500 XP = Level 2. 1200 XP = Level 3.
-      calcLevel = Math.floor(newTotalXp / 500) + 1;
-      
-      // Ensure level never drops
+      let calcLevel = Math.floor(newTotalXp / 500) + 1;
       if (calcLevel < state.level) calcLevel = state.level;
       
       return { 
@@ -90,8 +83,6 @@ const gameReducer = (state: GameState, action: Action): GameState => {
       };
       
     case 'PLACE_BUILDING':
-      // Just deduct coins, XP addition handled separately or here?
-      // Let's do both here to be safe
       return {
         ...state,
         coins: Math.max(0, state.coins - action.payload.def.price),
@@ -113,6 +104,14 @@ const gameReducer = (state: GameState, action: Action): GameState => {
           coins: state.coins + action.payload,
           referrals: state.referrals + 1
       };
+    case 'OFFLINE_EARNINGS':
+       return {
+           ...state,
+           coins: state.coins + action.payload.coins,
+           xp: state.xp + action.payload.xp,
+           totalXpEarned: state.totalXpEarned + action.payload.xp
+           // Level up check is mostly visual on load, done by logic
+       };
     default:
       return state;
   }
@@ -120,7 +119,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [gameState, dispatch] = useReducer(gameReducer, INITIAL_RESOURCES);
-  const [mapData] = useState<MapData>(() => generateMap(MAP_SIZE));
+  const [mapData, setMapData] = useState<MapData>(() => generateMap(MAP_SIZE));
   const [buildings, setBuildings] = useState<PlacedBuilding[]>([]);
   const [effects, setEffects] = useState<VisualEffect[]>([]);
   const [mode, setMode] = useState<GameMode>('VIEW');
@@ -135,7 +134,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [telegramUser, setTelegramUser] = useState<TelegramUser | null>(null);
   
   // Popup State
-  const [activePopup, setActivePopup] = useState<'NONE' | 'LEVEL_UP' | 'REFERRAL'>('NONE');
+  const [activePopup, setActivePopup] = useState<'NONE' | 'LEVEL_UP' | 'REFERRAL' | 'OFFLINE'>('NONE');
   const [popupData, setPopupData] = useState<any>(null);
 
   // Derived Stats
@@ -145,17 +144,81 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Time State (0-24)
   const [timeOfDay, setTimeOfDay] = useState(12);
 
-  // Level Up Check Effect
-  const prevLevel = useRef(gameState.level);
+  // Loading flag
+  const [isLoadingSave, setIsLoadingSave] = useState(true);
+
+  // --- PERSISTENCE & OFFLINE LOGIC ---
+
+  const saveData = useCallback(() => {
+      const data: SaveData = {
+          gameState: { ...gameState, lastSaveTime: Date.now() },
+          mapData,
+          buildings,
+          timeOfDay
+      };
+      storageService.saveState(data);
+  }, [gameState, mapData, buildings, timeOfDay]);
+
+  // Initial Load
   useEffect(() => {
-      if (gameState.level > prevLevel.current) {
-          audioService.playUpgrade();
-          setActivePopup('LEVEL_UP');
-          setPopupData({ level: gameState.level, reward: gameState.level * 1000 });
-          dispatch({ type: 'ADD_COINS', payload: gameState.level * 1000 });
-          prevLevel.current = gameState.level;
-      }
-  }, [gameState.level]);
+      const init = async () => {
+          const loaded = await storageService.loadState();
+          if (loaded) {
+              dispatch({ type: 'LOAD_STATE', payload: loaded.gameState });
+              setMapData(loaded.mapData);
+              setBuildings(loaded.buildings);
+              setTimeOfDay(loaded.timeOfDay);
+
+              // Offline Calculation
+              const now = Date.now();
+              const lastSave = loaded.gameState.lastSaveTime || now;
+              const diffMs = now - lastSave;
+              const diffSeconds = Math.floor(diffMs / 1000);
+              
+              // Max offline time: 24 hours (86400 seconds)
+              const cappedSeconds = Math.min(diffSeconds, 86400);
+              const diffMinutes = cappedSeconds / 60;
+
+              if (diffMinutes > 5) { // Minimum 5 mins to trigger
+                  let totalCoins = 0;
+                  let totalXp = 0;
+
+                  loaded.buildings.forEach(b => {
+                      const def = BUILDINGS.find(d => d.id === b.defId);
+                      if (def) {
+                          const income = Math.max(0, Math.floor(def.income * (1 + (b.level - 1) * 0.5)));
+                          totalCoins += income * diffMinutes;
+                          // Small passive XP? Let's say 10% of coins as XP for fun
+                          totalXp += Math.floor((income * diffMinutes) * 0.05); 
+                      }
+                  });
+                  
+                  totalCoins = Math.floor(totalCoins);
+                  
+                  if (totalCoins > 0) {
+                      dispatch({ type: 'OFFLINE_EARNINGS', payload: { coins: totalCoins, xp: totalXp } });
+                      setPopupData({ coins: totalCoins, xp: totalXp, timeOfflineSeconds: cappedSeconds });
+                      setActivePopup('OFFLINE');
+                  }
+              }
+
+          }
+          setIsLoadingSave(false);
+      };
+      init();
+  }, []);
+
+  // Auto-Save Loop (30s)
+  useEffect(() => {
+      if (isLoadingSave) return;
+      const interval = setInterval(() => {
+          saveData();
+      }, 30000);
+      return () => clearInterval(interval);
+  }, [saveData, isLoadingSave]);
+
+
+  // --- STANDARD GAME LOGIC ---
 
   // Initialize Telegram User & Referrals
   useEffect(() => {
@@ -175,19 +238,28 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setActivePopup('REFERRAL');
                 setPopupData({ reward: 5000 });
                 dispatch({ type: 'REFERRAL_REWARD', payload: 5000 });
-             }, 1000);
+                saveData(); // Save immediately on referral
+             }, 2000); // Delay slightly to not overlap with offline popup
         }
      }
   }, []);
 
-  // Internal Time Loop (12 minutes = 24 hours game time)
-  // 12 mins = 720 seconds. 24 hours / 720s = 0.0333 hours per second.
-  // We want 4 phases of 3 mins each.
-  // 00-06 (6h), 06-12 (6h), 12-18 (6h), 18-24 (6h).
+  // Level Up Check Effect
+  const prevLevel = useRef(gameState.level);
+  useEffect(() => {
+      if (!isLoadingSave && gameState.level > prevLevel.current) {
+          audioService.playUpgrade();
+          setActivePopup('LEVEL_UP');
+          setPopupData({ level: gameState.level, reward: gameState.level * 1000 });
+          dispatch({ type: 'ADD_COINS', payload: gameState.level * 1000 });
+          prevLevel.current = gameState.level;
+          saveData(); // Save on level up
+      }
+  }, [gameState.level, isLoadingSave, saveData]);
+
+  // Internal Time Loop
   useEffect(() => {
     const tickRate = 100; // ms
-    // Hours per real second = 24 / 720 = 1/30 = 0.0333
-    // Hours per 100ms = 0.00333
     const increment = 0.00333; 
 
     const interval = setInterval(() => {
@@ -314,12 +386,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         audioService.playPlace();
       }
 
-      // Reset interactions
       setGhostPositionRaw(null);
       setSelectedBuildingDef(null);
-      setMode('VIEW'); // Important: Switch to View
-      setSelectedInstance(null); // Important: Do NOT select the building (avoids mobile popup)
-      
+      setMode('VIEW'); 
+      setSelectedInstance(null);
+      saveData(); // Save on build
       return true;
   };
 
@@ -359,6 +430,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       dispatch({ type: 'ADD_XP', payload: def.xp * b.level });
       setBuildings(prev => prev.map(item => item.id === instanceId ? { ...item, level: item.level + 1} : item));
       audioService.playUpgrade();
+      saveData(); // Save on upgrade
       
       if (selectedInstance?.id === instanceId) {
           setSelectedInstance({ ...b, level: b.level + 1 });
@@ -386,6 +458,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSelectedInstance(null);
       setMode('VIEW');
       audioService.playClick();
+      saveData(); // Save on destroy
   };
 
   const startMovingBuilding = (instanceId: string) => {
@@ -397,7 +470,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSelectedBuildingDef(def!);
       setSelectedInstance(null);
       setMode('PLACING');
-      // Set initial ghost
       setGhostPositionRaw({ x: b.x, y: b.y, valid: true });
       audioService.playClick();
   };
@@ -445,13 +517,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addCoins: (amount: number) => dispatch({ type: 'ADD_COINS', payload: amount }),
     cycleTime: () => {
         audioService.playClick();
-        setTimeOfDay(prev => (prev + 2) % 24); // Debug skip
+        setTimeOfDay(prev => (prev + 2) % 24); 
     },
-    updatePlayerName: (name: string) => dispatch({ type: 'SET_NAME', payload: name }),
+    updatePlayerName: (name: string) => {
+        dispatch({ type: 'SET_NAME', payload: name });
+        saveData(); // Save name change
+    },
     exchangeXpForCoins: (xpAmount: number) => {
         if (gameState.xp >= xpAmount) {
             dispatch({ type: 'EXCHANGE_XP', payload: { xp: xpAmount, coins: xpAmount * 10 } });
             audioService.playUpgrade(); 
+            saveData(); // Save exchange
         }
     },
     closePopup: () => setActivePopup('NONE')
@@ -475,6 +551,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       timeOfDay,
       activePopup,
       popupData,
+      isLoadingSave,
       actions
     }}>
       {children}
